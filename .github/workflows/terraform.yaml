@@ -1,4 +1,4 @@
-name: Terraform + OPA CI
+name: Terraform OPA CI
 
 on:
   push:
@@ -13,28 +13,29 @@ jobs:
       TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Set up Terraform
+      - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.7.0
+          terraform_version: 1.6.6
 
-      - name: Run OPA policy check
-        uses: open-policy-agent/setup-opa@v2
-        with:
-          version: latest
+      - name: Terraform Init
+        run: terraform init
 
-      - name: Validate Terraform files
-        run: terraform fmt -check && terraform validate
+      - name: Terraform Format
+        run: terraform fmt -check
 
-      - name: Run OPA against Terraform plan
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: OPA Policy Check
         run: |
-          terraform init
-          terraform plan -out=tfplan.binary
-          terraform show -json tfplan.binary > tfplan.json
-          opa eval --format pretty --data policy/ --input tfplan.json "data.terraform.deny"
+          wget https://openpolicyagent.org/downloads/latest/opa_linux_amd64 -O opa
+          chmod +x opa
+          ./opa eval --format pretty --data policy/s3_policy.rego --input tfplan.json "data.terraform.deny"
 
-      - name: Push to Terraform Cloud
+      # Push to Terraform Cloud (triggers TFC UI run)
+      - name: Trigger Terraform Cloud Apply
         run: terraform apply -auto-approve
