@@ -1,11 +1,8 @@
 package terraform
 
-# Allow rule (true only if no public S3 buckets exist)
-allow if {
-  not public_buckets_exist
-}
-
-# Deny if S3 bucket is public
-public_buckets_exist if {
-  input.resource.aws_s3_bucket[_].acl == "public-read"
+# Deny creation of unencrypted S3 buckets
+deny[msg] {
+  input.resource_changes[_].type == "aws_s3_bucket"
+  not input.resource_changes[_].change.after.server_side_encryption_configuration
+  msg := "S3 bucket must have encryption enabled"
 }

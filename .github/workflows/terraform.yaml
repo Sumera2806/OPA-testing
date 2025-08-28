@@ -1,4 +1,4 @@
-name: OPA + Terraform Cloud
+name: Terraform + OPA CI
 
 on:
   push:
@@ -7,59 +7,34 @@ on:
   pull_request:
 
 jobs:
-  opa-check:
-    name: Run OPA Policy Check
+  terraform:
     runs-on: ubuntu-latest
+    env:
+      TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Install OPA
-        run: |
-          curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
-          chmod +x opa
-          sudo mv opa /usr/local/bin/
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.0
 
-      - name: Run OPA check
+      - name: Run OPA policy check
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: latest
+
+      - name: Validate Terraform files
+        run: terraform fmt -check && terraform validate
+
+      - name: Run OPA against Terraform plan
         run: |
-          opa eval --format pretty \
-          --data policy/s3.rego \
-          --input main.tf \
-          "data.terraform.allow"
-          
-  terraform-cloud-run:
-    name: Trigger Terraform Cloud Run
-    needs: opa-check
-    runs-on: ubuntu-latest
-    if: success() # only runs if OPA job succeeded
-    steps:
-      - name: Trigger Terraform Cloud Run
-        env:
-          TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
-          TFC_ORG: "terraform-opa-testing"
-          TFC_WORKSPACE: "terraform-opa-demo"
-        run: |
-          curl \
-            --header "Authorization: Bearer $TFC_TOKEN" \
-            --header "Content-Type: application/vnd.api+json" \
-            --request POST \
-            --data @- \
-            https://app.terraform.io/api/v2/workspaces/${TFC_WORKSPACE}/runs <<EOF
-          {
-            "data": {
-              "attributes": {
-                "message": "Triggered from GitHub Actions after OPA passed",
-                "is-destroy": false
-              },
-              "type": "runs",
-              "relationships": {
-                "workspace": {
-                  "data": {
-                    "type": "workspaces",
-                    "id": "${TFC_WORKSPACE}"
-                  }
-                }
-              }
-            }
-          }
-          EOF
+          terraform init
+          terraform plan -out=tfplan.binary
+          terraform show -json tfplan.binary > tfplan.json
+          opa eval --format pretty --data policy/ --input tfplan.json "data.terraform.deny"
+
+      - name: Push to Terraform Cloud
+        run: terraform apply -auto-approve
