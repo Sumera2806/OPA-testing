@@ -1,27 +1,65 @@
-name: Terraform OPA Pipeline
+name: OPA + Terraform Cloud
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
   pull_request:
 
 jobs:
-  terraform-opa:
+  opa-check:
+    name: Run OPA Policy Check
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-
-      - name: Install Conftest
+      - name: Install OPA
         run: |
-          wget https://github.com/open-policy-agent/conftest/releases/download/v0.45.0/conftest_0.45.0_Linux_x86_64.tar.gz
-          tar xzf conftest_0.45.0_Linux_x86_64.tar.gz
-          sudo mv conftest /usr/local/bin
+          curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
+          chmod +x opa
+          sudo mv opa /usr/local/bin/
 
-      - name: Run OPA check with Conftest
+      - name: Run OPA check
         run: |
-          conftest test main.tf --policy policy/
+          opa eval --format pretty \
+          --data policy/s3.rego \
+          --input main.tf \
+          "data.terraform.allow"
+          
+  terraform-cloud-run:
+    name: Trigger Terraform Cloud Run
+    needs: opa-check
+    runs-on: ubuntu-latest
+    if: success() # only runs if OPA job succeeded
+    steps:
+      - name: Trigger Terraform Cloud Run
+        env:
+          TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
+          TFC_ORG: "terraform-opa-testing"
+          TFC_WORKSPACE: "terraform-opa-demo"
+        run: |
+          curl \
+            --header "Authorization: Bearer $TFC_TOKEN" \
+            --header "Content-Type: application/vnd.api+json" \
+            --request POST \
+            --data @- \
+            https://app.terraform.io/api/v2/workspaces/${TFC_WORKSPACE}/runs <<EOF
+          {
+            "data": {
+              "attributes": {
+                "message": "Triggered from GitHub Actions after OPA passed",
+                "is-destroy": false
+              },
+              "type": "runs",
+              "relationships": {
+                "workspace": {
+                  "data": {
+                    "type": "workspaces",
+                    "id": "${TFC_WORKSPACE}"
+                  }
+                }
+              }
+            }
+          }
+          EOF
