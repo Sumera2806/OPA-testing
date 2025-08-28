@@ -1,0 +1,29 @@
+name: Terraform OPA Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Run OPA check
+        run: |
+          curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
+          chmod +x opa
+          ./opa eval --format pretty \
+            -i terraform.json \
+            -d policy/s3_policy.rego "data.terraform.s3.deny"
+
+      - name: Trigger Terraform Cloud Run
+        run: |
+          echo "Terraform Cloud will automatically pick this up"
