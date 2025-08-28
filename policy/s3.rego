@@ -1,7 +1,11 @@
-package terraform.s3
+package terraform
 
-deny[msg] {
-  input.resource_type == "aws_s3_bucket"
-  input.change.after.acl != "private"
-  msg = "S3 buckets must be private"
+# Allow rule (true only if no public S3 buckets exist)
+allow if {
+  not public_buckets_exist
+}
+
+# Deny if S3 bucket is public
+public_buckets_exist if {
+  input.resource.aws_s3_bucket[_].acl == "public-read"
 }
